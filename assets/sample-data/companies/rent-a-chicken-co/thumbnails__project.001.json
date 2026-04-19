@@ -1,0 +1,28 @@
+[
+  {
+    "company": [
+      {
+        "companyName": "Rent-A-Chicken Co.",
+        "companyDescription": "Seasonal backyard chicken rentals that provide families with egg-laying hens, a coop, and feed for several months.",
+        "companyEmail": "support@rentachicken.com",
+        "primaryCategory": "General Services",
+        "subCategory": "Seasonal Services",
+        "customerType": "b2c",
+        "logo": "wix:image://v1/44dd37_5d555f556da04d7c9019621e450ec688~mv2.jpeg/logo__rentachicken.jpeg#originWidth=1024&originHeight=1024",
+        "companyZipCode": "11109",
+        "companyPhone": "+1 (888) 555-1234",
+        "companyURL": "https://www.rentachicken.com",
+        "project": [
+          {
+            "title": "Backyard egg revolution made simple for next gen families and first time chicken keepers",
+            "description": "A fast paced humorous campaign that reframes backyard chickens as simple modern and rewarding for younger families showcasing easy setup daily egg collection and low effort care breaking the myth that chicken keeping is complicated or time consuming.",
+            "goal": "sentiment-shift",
+            "offer": "new-flagship-product",
+            "misconception": "complexity-ease-of-use",
+            "targetAudience": "next-gen-gen-z-millennials"
+          }
+        ]
+      }
+    ]
+  }
+]
