@@ -1,0 +1,626 @@
+{
+  "info": {
+    "name": "VMO — Vertex AI Media Generation",
+    "_postman_id": "vmo-vertex-ai-media-gen-v1",
+    "description": "Governance-grade test collection for VMO GCP project. Covers authentication verification, Imagen 4 image generation, and Veo video generation endpoints on Vertex AI.\n\n**Setup:**\n1. Set `service_account_key_json` variable to your full JSON key file contents\n2. Run 'Auth — Get Access Token' first; token auto-populates `access_token`\n3. Set `project_id` to `vmo-media-gen-prod`\n4. Set `gcs_output_bucket` to `gs://vmo-media-output-prod`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "project_id",
+      "value": "vmo-media-gen-prod",
+      "type": "string"
+    },
+    {
+      "key": "location",
+      "value": "us-central1",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "Auto-populated by 'Auth — Get Access Token' request"
+    },
+    {
+      "key": "gcs_output_bucket",
+      "value": "gs://vmo-media-output-prod",
+      "type": "string"
+    },
+    {
+      "key": "base_vertex_url",
+      "value": "https://{{location}}-aiplatform.googleapis.com/v1",
+      "type": "string"
+    },
+    {
+      "key": "last_veo_job_name",
+      "value": "",
+      "type": "string",
+      "description": "Auto-populated after Veo job submission for polling"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "00 — Authentication",
+      "item": [
+        {
+          "name": "Auth — Get Access Token (gcloud CLI)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://oauth2.googleapis.com/token",
+              "protocol": "https",
+              "host": ["oauth2", "googleapis", "com"],
+              "path": ["token"]
+            },
+            "description": "**Manual step — run this in your terminal first:**\n\n```bash\ngcloud auth activate-service-account \\\n  --key-file=~/vmo-n8n-key.json\n\ngcloud auth print-access-token\n```\n\nCopy the output token and set it as the `access_token` collection variable.\n\nAlternatively, use the Pre-request Script on any request in this collection to auto-generate via Google OAuth2 token endpoint using a JWT assertion."
+          },
+          "response": []
+        },
+        {
+          "name": "Auth — Validate Token (Tokeninfo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Token is valid', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Token has cloud-platform scope', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.scope).to.include('cloud-platform');",
+                  "});",
+                  "",
+                  "pm.test('Token email matches service account', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.email).to.include('vmo-n8n-invoker');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://oauth2.googleapis.com/tokeninfo?access_token={{access_token}}",
+              "protocol": "https",
+              "host": ["oauth2", "googleapis", "com"],
+              "path": ["tokeninfo"],
+              "query": [
+                {
+                  "key": "access_token",
+                  "value": "{{access_token}}"
+                }
+              ]
+            },
+            "description": "Validates the current access token. Confirms scope includes `cloud-platform` and email matches the `vmo-n8n-invoker` service account.\n\n**Expected:** 200 with `scope` containing `https://www.googleapis.com/auth/cloud-platform`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "01 — Project & API Validation",
+      "item": [
+        {
+          "name": "Project — Verify Vertex AI API Enabled",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Vertex AI API is enabled', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('State is ENABLED', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.state).to.eql('ENABLED');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://serviceusage.googleapis.com/v1/projects/{{project_id}}/services/aiplatform.googleapis.com",
+              "protocol": "https",
+              "host": ["serviceusage", "googleapis", "com"],
+              "path": ["v1", "projects", "{{project_id}}", "services", "aiplatform.googleapis.com"]
+            },
+            "description": "Confirms `aiplatform.googleapis.com` is enabled on the project. Returns `state: ENABLED` if correct."
+          },
+          "response": []
+        },
+        {
+          "name": "Project — Verify Storage API Enabled",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Storage API is enabled', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('State is ENABLED', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.state).to.eql('ENABLED');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://serviceusage.googleapis.com/v1/projects/{{project_id}}/services/storage.googleapis.com",
+              "protocol": "https",
+              "host": ["serviceusage", "googleapis", "com"],
+              "path": ["v1", "projects", "{{project_id}}", "services", "storage.googleapis.com"]
+            },
+            "description": "Confirms `storage.googleapis.com` is enabled on the project."
+          },
+          "response": []
+        },
+        {
+          "name": "Vertex AI — List Available Models (Model Garden)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Model Garden accessible', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains models array', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('publisherModels');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_vertex_url}}/publishers/google/models?pageSize=20",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["publishers", "google", "models"],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lists available Google publisher models in Vertex AI Model Garden. Confirms IAM access and API reachability."
+          },
+          "response": []
+        },
+        {
+          "name": "GCS — Verify Output Bucket Accessible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('GCS bucket accessible', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Bucket name matches', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.name).to.eql('vmo-media-output-prod');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://storage.googleapis.com/storage/v1/b/vmo-media-output-prod",
+              "protocol": "https",
+              "host": ["storage", "googleapis", "com"],
+              "path": ["storage", "v1", "b", "vmo-media-output-prod"]
+            },
+            "description": "Verifies the GCS output bucket exists and the service account has read metadata access. Required for Veo output path validation."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 — Imagen 4 Image Generation",
+      "item": [
+        {
+          "name": "Imagen 4 — Generate Image (Minimal)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Predictions array returned', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('predictions');",
+                  "    pm.expect(body.predictions).to.be.an('array').with.lengthOf.at.least(1);",
+                  "});",
+                  "",
+                  "pm.test('Image bytesBase64Encoded present', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.predictions[0]).to.have.property('bytesBase64Encoded');",
+                  "});",
+                  "",
+                  "pm.test('Response latency under 30s', function () {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(30000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instances\": [\n    {\n      \"prompt\": \"A professional product advertisement, minimalist white background, 9:16 vertical composition, cinematic lighting, ultra-detailed, photorealistic\"\n    }\n  ],\n  \"parameters\": {\n    \"sampleCount\": 1,\n    \"aspectRatio\": \"9:16\",\n    \"safetyFilterLevel\": \"block_some\",\n    \"personGeneration\": \"allow_adult\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_vertex_url}}/projects/{{project_id}}/locations/{{location}}/publishers/google/models/imagen-4.0:predict",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["projects", "{{project_id}}", "locations", "{{location}}", "publishers", "google", "models", "imagen-4.0:predict"]
+            },
+            "description": "Minimal Imagen 4 generation test. Single image, 9:16 aspect ratio, inline base64 response.\n\n**Expected:** 200 with `predictions[0].bytesBase64Encoded` populated.\n\n**Note:** If `imagen-4.0` returns 404, try `imagegeneration@006` as the model ID — GA model string may differ by region."
+          },
+          "response": []
+        },
+        {
+          "name": "Imagen 4 — Generate Image (GCS Output)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('GCS URI returned', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.predictions[0]).to.have.property('gcsUri');",
+                  "    pm.expect(body.predictions[0].gcsUri).to.include('gs://');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instances\": [\n    {\n      \"prompt\": \"A professional product advertisement, minimalist white background, 9:16 vertical composition, cinematic lighting, ultra-detailed, photorealistic\"\n    }\n  ],\n  \"parameters\": {\n    \"sampleCount\": 1,\n    \"aspectRatio\": \"9:16\",\n    \"safetyFilterLevel\": \"block_some\",\n    \"personGeneration\": \"allow_adult\",\n    \"storageUri\": \"{{gcs_output_bucket}}/imagen/\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_vertex_url}}/projects/{{project_id}}/locations/{{location}}/publishers/google/models/imagen-4.0:predict",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["projects", "{{project_id}}", "locations", "{{location}}", "publishers", "google", "models", "imagen-4.0:predict"]
+            },
+            "description": "Imagen 4 generation with output written to GCS instead of inline base64. Use this pattern in production pipelines to avoid large base64 payloads in n8n.\n\n**Expected:** `predictions[0].gcsUri` pointing to `gs://vmo-media-output-prod/imagen/`"
+          },
+          "response": []
+        },
+        {
+          "name": "Imagen 4 — Multi-Sample Batch (4 Variations)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('4 predictions returned', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.predictions).to.have.lengthOf(4);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instances\": [\n    {\n      \"prompt\": \"Luxury fashion advertisement, female model, clean studio background, 9:16 vertical, editorial lighting, high fashion magazine style\"\n    }\n  ],\n  \"parameters\": {\n    \"sampleCount\": 4,\n    \"aspectRatio\": \"9:16\",\n    \"safetyFilterLevel\": \"block_some\",\n    \"personGeneration\": \"allow_adult\",\n    \"storageUri\": \"{{gcs_output_bucket}}/imagen/batch-test/\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_vertex_url}}/projects/{{project_id}}/locations/{{location}}/publishers/google/models/imagen-4.0:predict",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["projects", "{{project_id}}", "locations", "{{location}}", "publishers", "google", "models", "imagen-4.0:predict"]
+            },
+            "description": "Tests multi-sample generation (4 variations from a single prompt). Validates CC's 'One-Click Campaign' variation requirement.\n\n**Max sampleCount:** 8 per request on Imagen 4."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 — Veo Video Generation",
+      "item": [
+        {
+          "name": "Veo — Submit Generation Job",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK — Job Accepted', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Operation name returned', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('name');",
+                  "    pm.expect(body.name).to.include('operations');",
+                  "});",
+                  "",
+                  "// Auto-store job name for polling request",
+                  "const body = pm.response.json();",
+                  "if (body.name) {",
+                  "    pm.collectionVariables.set('last_veo_job_name', body.name);",
+                  "    console.log('Veo job stored:', body.name);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"model\": \"veo-2.0-generate-001\",\n  \"instances\": [\n    {\n      \"prompt\": \"A sleek product advertisement, vertical 9:16 format, smooth cinematic camera pan, professional studio lighting, luxury brand aesthetic, 5 seconds\"\n    }\n  ],\n  \"parameters\": {\n    \"aspectRatio\": \"9:16\",\n    \"videoLength\": \"5s\",\n    \"sampleCount\": 1,\n    \"storageUri\": \"{{gcs_output_bucket}}/veo/\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_vertex_url}}/projects/{{project_id}}/locations/{{location}}/publishers/google/models/veo-2.0-generate-001:predictLongRunning",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["projects", "{{project_id}}", "locations", "{{location}}", "publishers", "google", "models", "veo-2.0-generate-001:predictLongRunning"]
+            },
+            "description": "Submits a Veo video generation job. Returns a long-running operation name.\n\n**Critical:** Veo uses `:predictLongRunning` — NOT `:predict`. Video generation is async; poll for completion using the next request.\n\n**Auto-saves:** `last_veo_job_name` variable for polling.\n\n**Output:** Written to `{{gcs_output_bucket}}/veo/`"
+          },
+          "response": []
+        },
+        {
+          "name": "Veo — Poll Job Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const body = pm.response.json();",
+                  "",
+                  "pm.test('Operation name present', function () {",
+                  "    pm.expect(body).to.have.property('name');",
+                  "});",
+                  "",
+                  "if (body.done === true) {",
+                  "    pm.test('Job completed successfully', function () {",
+                  "        pm.expect(body).to.not.have.property('error');",
+                  "    });",
+                  "    pm.test('Video GCS URI present', function () {",
+                  "        const videos = body.response?.predictions?.[0]?.gcsUri || body.response?.videos?.[0]?.gcsUri;",
+                  "        pm.expect(videos).to.include('gs://');",
+                  "    });",
+                  "    console.log('Veo job DONE:', JSON.stringify(body.response, null, 2));",
+                  "} else {",
+                  "    console.log('Job still running. done =', body.done, '| Poll again in 10–30s.');",
+
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_vertex_url}}/{{last_veo_job_name}}",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["{{last_veo_job_name}}"]
+            },
+            "description": "Polls the Veo long-running operation for completion status.\n\n**Uses:** `last_veo_job_name` variable auto-set by the Submit Job request.\n\n**Poll interval:** Every 10–30 seconds. Veo generation typically completes in 60–180 seconds depending on duration and load.\n\n**Done signal:** `body.done === true` with no `error` field.\n\n**In n8n:** Implement as a Wait → HTTP Request loop with conditional exit on `done`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 — Gemini (Prompt Generation)",
+      "item": [
+        {
+          "name": "Gemini Flash — Generate Imagen Prompt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200 OK', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Candidates returned', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('candidates');",
+                  "    pm.expect(body.candidates).to.be.an('array').with.lengthOf.at.least(1);",
+                  "});",
+                  "",
+                  "pm.test('Text content present', function () {",
+                  "    const body = pm.response.json();",
+                  "    const text = body.candidates[0]?.content?.parts?.[0]?.text;",
+                  "    pm.expect(text).to.be.a('string').with.lengthOf.greaterThan(20);",
+                  "    console.log('Generated prompt:', text);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contents\": [\n    {\n      \"role\": \"user\",\n      \"parts\": [\n        {\n          \"text\": \"Generate a single Imagen image generation prompt for a 9:16 vertical social media advertisement. Product category: luxury skincare. Style: editorial, cinematic. Output only the prompt text, no explanation, no quotes.\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.7,\n    \"maxOutputTokens\": 300,\n    \"topP\": 0.9\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_vertex_url}}/projects/{{project_id}}/locations/{{location}}/publishers/google/models/gemini-2.0-flash:generateContent",
+              "host": ["{{base_vertex_url}}"],
+              "path": ["projects", "{{project_id}}", "locations", "{{location}}", "publishers", "google", "models", "gemini-2.0-flash:generateContent"]
+            },
+            "description": "Tests Gemini Flash as the prompt generation stage of the VMO pipeline. In production, this feeds directly into the Imagen 4 request.\n\n**Pipeline pattern:** Gemini (prompt gen) → Imagen (image gen) → Veo (video gen)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 — IAM & Quota Diagnostics",
+      "item": [
+        {
+          "name": "IAM — Test Service Account Permissions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('aiplatform.endpoints.predict permission granted', function () {",
+                  "    const body = pm.response.json();",
+                  "    const perms = body.permissions || [];",
+                  "    pm.expect(perms).to.include('aiplatform.endpoints.predict');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"aiplatform.endpoints.predict\",\n    \"storage.objects.create\",\n    \"storage.objects.get\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "https://cloudresourcemanager.googleapis.com/v1/projects/{{project_id}}:testIamPermissions",
+              "protocol": "https",
+              "host": ["cloudresourcemanager", "googleapis", "com"],
+              "path": ["v1", "projects", "{{project_id}}:testIamPermissions"]
+            },
+            "description": "Verifies the authenticated service account has the exact permissions required. Returns only the permissions that are actually granted.\n\n**Expected permissions:**\n- `aiplatform.endpoints.predict`\n- `storage.objects.create`\n- `storage.objects.get`\n\nMissing permissions indicate IAM misconfiguration."
+          },
+          "response": []
+        },
+        {
+          "name": "Quota — Check Vertex AI Quotas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://serviceusage.googleapis.com/v1beta1/projects/{{project_id}}/services/aiplatform.googleapis.com/consumerQuotaMetrics?pageSize=50",
+              "protocol": "https",
+              "host": ["serviceusage", "googleapis", "com"],
+              "path": ["v1beta1", "projects", "{{project_id}}", "services", "aiplatform.googleapis.com", "consumerQuotaMetrics"],
+              "query": [
+                {
+                  "key": "pageSize",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Returns Vertex AI quota metrics for the project. Review before scaling to confirm you have sufficient quota for:\n- `generate-requests-per-minute` (Imagen)\n- `video-generate-requests-per-minute` (Veo)\n\nRequest quota increases via GCP Console → IAM & Admin → Quotas if needed."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
